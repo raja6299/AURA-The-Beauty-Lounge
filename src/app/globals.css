@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-rose-gold: #D4A373;
+  --color-champagne-gold: #E6C79C;
+  --color-ivory: #FFF9F3;
+  --color-warm-beige: #F5EFE6;
+  --color-deep-plum: #4A2545;
+  --color-luxury-black: #111111;
+  
+  --color-background: var(--color-ivory);
+  --color-foreground: var(--color-luxury-black);
+  
+  --font-heading: var(--font-playfair), serif;
+  --font-heading-alt: var(--font-cormorant), serif;
+  --font-sans: var(--font-poppins), sans-serif;
+  --font-sans-alt: var(--font-inter), sans-serif;
+}
+
+/* Base resets & styles */
+:root {
+  --background: #FFF9F3;
+  --foreground: #111111;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Selection */
+::selection {
+  background-color: var(--color-rose-gold);
+  color: var(--color-luxury-black);
+}
+
+/* Smooth Scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Hide scrollbar for clean UI but keep functionality */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-warm-beige);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-champagne-gold);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-rose-gold);
+}

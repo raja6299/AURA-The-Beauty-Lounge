@@ -1,0 +1,488 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// 1. AUTHENTICATION & CORE USERS
+// ==========================================
+
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+  STAFF
+  CUSTOMER
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  password      String?
+  image         String?
+  role          Role      @default(CUSTOMER)
+  
+  accounts      Account[]
+  sessions      Session[]
+  customer      Customer?
+  staff         Staff?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?  @db.Text
+  access_token       String?  @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?  @db.Text
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ==========================================
+// 2. CRM: CUSTOMERS & LEADS
+// ==========================================
+
+model Customer {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  phone           String?
+  address         String?
+  
+  // CRM Analytics
+  loyaltyPoints   Int      @default(0)
+  totalSpending   Float    @default(0.0)
+  visitCount      Int      @default(0)
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments    Appointment[]
+  memberships     CustomerMembership[]
+  reviews         Testimonial[]
+  payments        Payment[]
+  waitlists       Waitlist[]
+  couponUsages    CouponRedemption[]
+  purchasedGifts  GiftCard[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ContactLead {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String
+  email       String?
+  service     String?
+  message     String?  @db.Text
+  status      String   @default("NEW") // NEW, CONTACTED, CONVERTED, CLOSED
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ==========================================
+// 3. STAFF & SCHEDULING
+// ==========================================
+
+model Staff {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  specialty    String?
+  bio          String?  @db.Text
+  isActive     Boolean  @default(true)
+  
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+  availability AvailabilitySlot[]
+  leaveRecords LeaveRecord[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model AvailabilitySlot {
+  id          String   @id @default(cuid())
+  staffId     String
+  dayOfWeek   Int      // 0=Sun, 1=Mon, etc.
+  startTime   String   // "09:00"
+  endTime     String   // "17:00"
+
+  staff       Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  
+  @@index([staffId])
+}
+
+model LeaveRecord {
+  id          String   @id @default(cuid())
+  staffId     String
+  startDate   DateTime 
+  endDate     DateTime 
+  reason      String?
+  status      String   @default("APPROVED") // PENDING, APPROVED, CANCELLED
+
+  staff       Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId])
+  @@index([startDate, endDate])
+}
+
+// ==========================================
+// 4. SERVICES
+// ==========================================
+
+model ServiceCategory {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  image       String?
+  isActive    Boolean   @default(true)
+  
+  services    Service[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Service {
+  id            String    @id @default(cuid())
+  categoryId    String
+  name          String
+  description   String?
+  price         Float
+  
+  // Timing Logic
+  durationMins  Int       // Base service time
+  bufferMins    Int       @default(0) // Prep time
+  cleanupMins   Int       @default(0) // Cleanup after
+  
+  image         String?
+  isActive      Boolean   @default(true)
+  
+  category      ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  appointments  AppointmentService[]
+  waitlists     Waitlist[]
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([categoryId])
+}
+
+// ==========================================
+// 5. BOOKING ENGINE & WAITLIST
+// ==========================================
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Appointment {
+  id              String   @id @default(cuid())
+  customerId      String
+  staffId         String?
+  
+  // Calculated Timings
+  startTime       DateTime 
+  endTime         DateTime // Includes buffer + cleanup
+  
+  status          AppointmentStatus @default(PENDING)
+  
+  // Financials
+  subtotal        Float    
+  discountApplied Float    @default(0.0) 
+  totalAmount     Float    
+  notes           String?  @db.Text
+
+  customer        Customer @relation(fields: [customerId], references: [id])
+  staff           Staff?   @relation(fields: [staffId], references: [id])
+  services        AppointmentService[]
+  payments        Payment[]
+  couponUsages    CouponRedemption[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([staffId])
+  @@index([startTime, endTime])
+}
+
+model AppointmentService {
+  appointmentId String
+  serviceId     String
+  priceAtTime   Float
+  
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  service       Service     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([appointmentId, serviceId])
+}
+
+model Waitlist {
+  id            String   @id @default(cuid())
+  customerId    String
+  serviceId     String
+  preferredDate DateTime
+  status        String   @default("WAITING") // WAITING, NOTIFIED, BOOKED, EXPIRED
+  
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  service       Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  notifications WaitlistNotification[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([preferredDate])
+  @@index([customerId])
+}
+
+// ==========================================
+// 6. PAYMENTS, COUPONS & GIFT CARDS
+// ==========================================
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIALLY_PAID
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  appointmentId String
+  customerId    String
+  amount        Float
+  status        PaymentStatus @default(PENDING)
+  provider      String   // Razorpay, UPI, PhonePe, Card, Cash
+  transactionId String?  @unique
+
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  customer      Customer    @relation(fields: [customerId], references: [id])
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([appointmentId])
+  @@index([customerId])
+}
+
+enum DiscountType {
+  FIXED
+  PERCENTAGE
+}
+
+model Coupon {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  type          DiscountType
+  value         Float
+  expiryDate    DateTime?
+  maxUses       Int?     
+  currentUses   Int      @default(0)
+  isActive      Boolean  @default(true)
+
+  redemptions   CouponRedemption[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model CouponRedemption {
+  id            String   @id @default(cuid())
+  couponId      String
+  appointmentId String
+  customerId    String
+
+  coupon        Coupon      @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime @default(now())
+
+  @@unique([couponId, appointmentId])
+  @@index([customerId])
+}
+
+model GiftCard {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  initialValue  Float
+  balance       Float
+  status        String   @default("ACTIVE") // ACTIVE, REDEEMED, EXPIRED
+  expiryDate    DateTime?
+  
+  purchaserId   String?
+  recipientEmail String?
+
+  purchaser     Customer? @relation(fields: [purchaserId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([code])
+}
+
+// ==========================================
+// 7. MEMBERSHIPS & OFFERS
+// ==========================================
+
+model Membership {
+  id            String   @id @default(cuid())
+  name          String
+  description   String   @db.Text
+  price         Float
+  durationDays  Int
+  benefits      String[]
+  discountPct   Float    @default(0.0)
+
+  customers     CustomerMembership[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model CustomerMembership {
+  customerId    String
+  membershipId  String
+  startDate     DateTime @default(now())
+  endDate       DateTime
+  isActive      Boolean  @default(true)
+
+  customer      Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  membership    Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@id([customerId, membershipId])
+}
+
+model Offer {
+  id            String   @id @default(cuid())
+  title         String
+  description   String   @db.Text
+  discountPct   Float?
+  validUntil    DateTime?
+  image         String?
+  isActive      Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ==========================================
+// 8. LOGS & AUDIT (DASHBOARD PREP)
+// ==========================================
+
+enum NotificationType {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+model NotificationLog {
+  id          String   @id @default(cuid())
+  type        NotificationType
+  recipient   String   // Email or Phone
+  status      String   // SENT, FAILED, PENDING
+  payload     String   @db.Text
+  
+  createdAt   DateTime @default(now())
+}
+
+model WaitlistNotification {
+  id          String   @id @default(cuid())
+  waitlistId  String
+  status      String   // SENT, READ
+  
+  waitlist    Waitlist @relation(fields: [waitlistId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  entityType  String   // APPOINTMENT, STAFF, CUSTOMER, PAYMENT
+  entityId    String   
+  action      String   // CREATE, UPDATE, DELETE, STATUS_CHANGE
+  changes     String   @db.Text // JSON stringified changes
+  performedBy String?  // UserId of the admin/staff
+
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ==========================================
+// 9. CONTENT & ASSETS
+// ==========================================
+
+model BlogPost {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  content     String   @db.Text
+  excerpt     String?
+  image       String?
+  published   Boolean  @default(false)
+  authorId    String
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model GalleryItem {
+  id          String   @id @default(cuid())
+  title       String?
+  imageUrl    String
+  category    String?
+  displayOrder Int     @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Testimonial {
+  id          String   @id @default(cuid())
+  customerId  String?
+  name        String   
+  role        String?  
+  rating      Int      @default(5)
+  text        String   @db.Text
+  image       String?
+  isApproved  Boolean  @default(false)
+
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
